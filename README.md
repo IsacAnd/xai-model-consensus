@@ -1,4 +1,4 @@
-# Pipeline ADD + XAI — Etapas 1, 2, 3 e 4
+# XAI MODEL CONSENSUS
 
 Este projeto cobre: organização dos dados do **ASVspoof 5** (Etapa 1),
 treinamento padronizado de 6 arquiteturas — CNN, CRNN, EfficientNet-b0, ViT
@@ -281,27 +281,6 @@ SHAP dos 6 modelos → métricas de comparação (Etapa 5), em sequência. Dado 
 custo da Etapa 4 (ver nota acima), para rodadas exploratórias pode ser mais
 prático rodar `--stage all` só até a avaliação e disparar `--stage xai` e
 `--stage similarity` separadamente via Slurm.
-
-## 8. Rodando no CENAPAD via Slurm
-
-```bash
-# Etapa 1 (uma vez, sem GPU)
-sbatch scripts/run_slurm_organize.sh
-
-# Etapa 2 (job array, 1 task por modelo, roda os 6 em paralelo)
-sbatch scripts/run_slurm.sh
-
-# Etapa 4 (job array, 1 task por modelo, roda os 6 em paralelo)
-sbatch scripts/run_slurm_xai.sh
-
-# Etapa 5 (job único, sem GPU — só numpy/scipy/pandas; roda depois que
-# a Etapa 4 tiver terminado para os modelos de interesse)
-sbatch scripts/run_slurm_similarity.sh
-```
-
-Ajuste `--partition`, `module load` e o path do virtualenv nos scripts
-conforme a configuração específica do seu acesso no CENAPAD (via
-`tsh`/Teleport).
 
 ## Decisões de design (para revisar/ajustar conforme a necessidade do artigo)
 

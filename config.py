@@ -37,14 +37,11 @@ def _env_str(name: str, default: str) -> str:
 
 @dataclass
 class PathConfig:
-    # Raiz onde o dataset (ASVspoof5 real, ou o toy dataset gerado localmente)
-    # foi descompactado/criado. Sobrescrevível via env var ASVSPOOF5_ROOT.
+    # Raiz onde o dataset foi descompactado/criado
     asvspoof5_root: Path = field(
         default_factory=lambda: _env_path("ASVSPOOF5_ROOT", "toy_data/ASVspoof5")
     )
 
-    # Os campos abaixo são recalculados em __post_init__ a partir de
-    # asvspoof5_root, para respeitar o valor vindo da env var.
     train_audio_dir: Path = None
     dev_audio_dir: Path = None
     eval_audio_dir: Path = None
@@ -52,7 +49,7 @@ class PathConfig:
     dev_protocol: Path = None
     eval_protocol: Path = None
 
-    # Saídas do pipeline (sempre relativas ao projeto, não ao dataset)
+    # Saídas do pipeline
     project_root: Path = field(default_factory=lambda: Path(__file__).resolve().parent)
     manifest_dir: Path = None
     cache_dir: Path = None
