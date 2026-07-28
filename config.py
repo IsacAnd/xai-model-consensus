@@ -39,7 +39,7 @@ def _env_str(name: str, default: str) -> str:
 class PathConfig:
     # Raiz onde o dataset foi descompactado/criado
     asvspoof5_root: Path = field(
-        default_factory=lambda: _env_path("ASVSPOOF5_ROOT", "toy_data/ASVspoof5")
+        default_factory=lambda: _env_path("ASVSPOOF5_ROOT", "toy_data/ASVSpoof5")
     )
 
     train_audio_dir: Path = None
@@ -174,7 +174,7 @@ class TrainConfig:
     grad_clip_norm: float = 5.0
     num_workers: int = field(default_factory=lambda: _env_int("ADD_NUM_WORKERS", 0))
     seed: int = 42
-    device: str = field(default_factory=lambda: _env_str("ADD_DEVICE", "cpu"))
+    device: str = field(default_factory=lambda: _env_str("ADD_DEVICE", "cuda"))
     label_smoothing: float = 0.0
     n_classes: int = 2                # 0 = bonafide, 1 = spoof
     mixed_precision: bool = True

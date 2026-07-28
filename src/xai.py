@@ -52,7 +52,7 @@ import shap
 from config import MODEL_NAMES, PATHS, TRAIN, XAI
 from src.dataset import ADDDataset, collate_fn, load_manifest
 from src.models import build_model
-from src.utils import set_seed, setup_logging
+from src.utils import set_seed, setup_logging, merge_shap_manifests  # noqa: F401 (reexportado por compat.)
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +64,11 @@ def _load_model(model_name: str, device: torch.device) -> torch.nn.Module:
             f"Checkpoint não encontrado: {checkpoint_path}. "
             f"Rode a Etapa 2 (src/train.py --model {model_name}) antes da Etapa 4."
         )
-    ckpt = torch.load(checkpoint_path, map_location=device)
+    # weights_only=False: necessário porque o checkpoint carrega dicts extras
+    # (val_metrics, audio_config), não só tensores. Seguro aqui porque o
+    # próprio pipeline (train.py) gerou o arquivo - não é um checkpoint de
+    # terceiros de fonte não confiável.
+    ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
     model = build_model(model_name, n_classes=TRAIN.n_classes).to(device)
     model.load_state_dict(ckpt["model_state_dict"])
     model.eval()
@@ -222,13 +226,22 @@ def generate_shap_maps(model_name: str) -> None:
         logger.info("  [%s] %d/%d exemplares processados", model_name, n_done, n_total)
 
     df_new = pd.DataFrame(rows)
-    manifest_path = PATHS.shap_manifest_path
-    if manifest_path.exists():
-        df_old = pd.read_csv(manifest_path)
-        df_old = df_old[df_old["model"] != model_name]  # substitui reruns antigos do mesmo modelo
-        df_new = pd.concat([df_old, df_new], ignore_index=True)
+    # IMPORTANTE: cada modelo escreve seu PRÓPRIO arquivo de manifesto
+    # (shap_manifest_<modelo>.csv), em vez de ler-modificar-escrever o
+    # shap_manifest.csv compartilhado. Isso evita uma race condition quando
+    # a Etapa 4 roda como job array do Slurm (1 task por modelo, todas em
+    # paralelo): se todas as tasks lessem e reescrevessem o mesmo CSV
+    # compartilhado ao mesmo tempo, a última a escrever apagaria o trabalho
+    # das outras. A junção em um único shap_manifest.csv é feita depois,
+    # uma única vez, por merge_shap_manifests() (chamado pela Etapa 5, que
+    # roda como job único após todas as tasks da Etapa 4 terminarem).
+    manifest_path = PATHS.shap_dir / f"shap_manifest_{model_name}.csv"
     df_new.to_csv(manifest_path, index=False)
-    logger.info("Manifesto SHAP atualizado: %s (%d linhas)", manifest_path, len(df_new))
+    logger.info("Manifesto SHAP do modelo '%s' salvo em %s (%d linhas)",
+                model_name, manifest_path, len(df_new))
+
+
+
 
 
 def run_xai(model: str) -> None:

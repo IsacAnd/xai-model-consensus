@@ -54,7 +54,7 @@ from scipy.stats import spearmanr
 from skimage.metrics import structural_similarity as ssim_fn
 
 from config import PATHS, SIMILARITY
-from src.utils import setup_logging
+from src.utils import setup_logging, merge_shap_manifests
 
 logger = logging.getLogger(__name__)
 
@@ -62,12 +62,12 @@ METRIC_COLS = ["cosine", "ssim", "spearman", "euclidean", "jsd"]
 
 
 def _load_shap_manifest() -> pd.DataFrame:
-    path = PATHS.shap_manifest_path
-    if not path.exists():
-        raise FileNotFoundError(
-            f"{path} não existe. Rode a Etapa 4 (src/xai.py) antes da Etapa 5."
-        )
-    return pd.read_csv(path)
+    # Reconstrói o shap_manifest.csv combinado a partir dos manifestos por
+    # modelo (shap_manifest_<modelo>.csv) toda vez que a Etapa 5 roda. Isso é
+    # seguro porque a Etapa 5 é um job único (não um array em paralelo) e
+    # garante que a comparação sempre reflita os modelos mais recentes da
+    # Etapa 4, mesmo que ela tenha rodado como job array (1 modelo por task).
+    return merge_shap_manifests()
 
 
 def _load_matrix(matrix_path: str) -> np.ndarray:
@@ -164,8 +164,8 @@ def compute_pairwise_metrics(manifest: pd.DataFrame = None) -> pd.DataFrame:
 
     for i, (file_id, group) in enumerate(grouped, start=1):
         # reruns da Etapa 4 para o mesmo modelo já são deduplicados dentro
-        # de src/xai.py (substitui o manifest antigo daquele modelo), mas
-        # mantém-se essa proteção por robustez
+        # de merge_shap_manifests() (mantém a versão mais recente por
+        # [model, file_id]), mas mantém-se essa proteção aqui por robustez
         group = group.drop_duplicates(subset="model", keep="last")
         available_models = sorted(group["model"].unique())
         if len(available_models) < 2:

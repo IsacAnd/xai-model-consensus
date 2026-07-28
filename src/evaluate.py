@@ -56,7 +56,11 @@ def evaluate_model(model_name: str, split: str = "eval") -> dict:
         )
 
     device = torch.device(TRAIN.device if torch.cuda.is_available() else "cpu")
-    ckpt = torch.load(checkpoint_path, map_location=device)
+    # weights_only=False: necessário porque o checkpoint carrega dicts extras
+    # (val_metrics, audio_config), não só tensores. Seguro aqui porque o
+    # próprio pipeline (train.py) gerou o arquivo - não é um checkpoint de
+    # terceiros de fonte não confiável.
+    ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
 
     model = build_model(model_name, n_classes=TRAIN.n_classes).to(device)
     model.load_state_dict(ckpt["model_state_dict"])

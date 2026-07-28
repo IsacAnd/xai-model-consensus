@@ -77,7 +77,7 @@ def train_one_model(model_name: str):
     logger.info("Config áudio: %s", AUDIO)
     logger.info("Config treino: %s", TRAIN)
 
-    device = torch.device(TRAIN.device if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if device.type == "cpu":
         logger.warning("CUDA não disponível, treinando em CPU (lento).")
 

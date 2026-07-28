@@ -4,7 +4,12 @@ import logging
 import random
 
 import numpy as np
+import pandas as pd
 import torch
+
+from config import PATHS
+
+logger = logging.getLogger(__name__)
 
 
 def set_seed(seed: int):
@@ -57,3 +62,39 @@ class EarlyStopping:
         if self.counter >= self.patience:
             self.should_stop = True
         return False
+
+
+def merge_shap_manifests() -> pd.DataFrame:
+    """
+    Combina os manifestos por modelo (results/shap/shap_manifest_<modelo>.csv,
+    um por task da Etapa 4) em um único results/shap/shap_manifest.csv,
+    consumido pela Etapa 5.
+
+    Cada modelo escreve seu próprio arquivo em src/xai.py (em vez de um
+    read-modify-write compartilhado), justamente para evitar race condition
+    quando a Etapa 4 roda como job array do Slurm (1 modelo por task, todas
+    em paralelo). Esta função faz a junção uma única vez, e só deve ser
+    chamada depois que TODAS as tasks da Etapa 4 já terminaram (ex.: pela
+    Etapa 5, que roda como job único com `--dependency=afterok:<job_id>`
+    em relação ao array da Etapa 4).
+    """
+    parts = sorted(PATHS.shap_dir.glob("shap_manifest_*.csv"))
+    if not parts:
+        raise FileNotFoundError(
+            f"Nenhum shap_manifest_<modelo>.csv encontrado em {PATHS.shap_dir}. "
+            f"Rode a Etapa 4 (src/xai.py) para pelo menos 1 modelo antes."
+        )
+
+    dfs = [pd.read_csv(p) for p in parts]
+    merged = pd.concat(dfs, ignore_index=True)
+    # drop_duplicates por segurança, caso uma task tenha sido re-executada
+    # manualmente (mantém a versão mais recente por [model, file_id])
+    merged = merged.drop_duplicates(subset=["model", "file_id"], keep="last")
+
+    merged.to_csv(PATHS.shap_manifest_path, index=False)
+    logger.info(
+        "Manifesto SHAP combinado salvo em %s (%d linhas, modelos: %s)",
+        PATHS.shap_manifest_path, len(merged),
+        sorted(merged["model"].unique().tolist()),
+    )
+    return merged
