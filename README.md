@@ -36,10 +36,6 @@ xai-model-consensus/
 │       ├── resnet.py         # ResNet18 (from scratch, 1 canal)
 │       └── mobilenet.py      # MobileNetV3-Small (from scratch, 1 canal)
 ├── scripts/
-│   ├── run_slurm.sh          # job array (1 por modelo) para o CENAPAD - treino
-│   ├── run_slurm_organize.sh # job único para a Etapa 1
-│   ├── run_slurm_xai.sh      # job array (1 por modelo) para o CENAPAD - SHAP (Etapa 4)
-│   └── run_slurm_similarity.sh # job único para a Etapa 5 (depende de todos os modelos)
 ├── data/                     # manifests gerados (CSV), incluindo xai_subset_1000.csv
 ├── cache/logmel/              # cache dos tensores log-mel (train/dev/eval)
 └── results/
