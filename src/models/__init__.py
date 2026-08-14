@@ -11,7 +11,7 @@ from src.models.conformer import Conformer
 
 MODEL_REGISTRY = {
     "cnn": CNN,
-    "crnn": BiGRU,
+    "bigru": BiGRU,
     "bilstm": BiLSTM,
     "efficientnet": EfficientNet,
     "resnet": ResNet,
