@@ -216,7 +216,7 @@ class SimilarityConfig:
     jsd_log_base: float = 2.0
 
 
-MODEL_NAMES = ["cnn", "crnn", "efficientnet", "vit", "resnet", "mobilenet"]
+MODEL_NAMES = ["cnn", "bigru", "efficientnet", "vit", "resnet", "mobilenet", "bilstm", "swin", "ast", "conformer"]
 
 PATHS = PathConfig()
 AUDIO = AudioConfig()

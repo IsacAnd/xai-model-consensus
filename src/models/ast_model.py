@@ -1,29 +1,47 @@
 """
-ViT maior para classificação de
-log-mel spectrograms.
-
-Características:
-    - treinamento from scratch
-    - entrada de 1 canal
-    - patch embedding via Conv2d
-    - positional embedding aprendido
-    - número de patches adaptável
-    - Transformer Encoder
-    - classificação binária
+AST para classificação binária de deepfake de voz.
 
 Entrada:
     [B, 1, n_mels, T]
 
 Saída:
     [B, n_classes]
+
+Arquitetura:
+
+    log-mel spectrogram
+            ↓
+    espectro-temporal patch embedding
+            ↓
+    CLS token + positional embedding
+            ↓
+    Transformer Encoder
+            ↓
+    CLS representation
+            ↓
+    classifier
+
+
+Versões:
+
+    AST:
+        embed_dim = 384
+        depth     = 8
+        n_heads   = 6
+
+Treinamento:
+    - from scratch
+    - sem pesos pré-treinados
+    - entrada de 1 canal
 """
+
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 
-class PatchEmbed(nn.Module):
+class ASTPatchEmbed(nn.Module):
 
     def __init__(
         self,
@@ -33,56 +51,68 @@ class PatchEmbed(nn.Module):
     ):
         super().__init__()
 
+        self.patch_size = patch_size
+
         self.proj = nn.Conv2d(
+
             in_channels,
+
             embed_dim,
+
             kernel_size=patch_size,
+
             stride=patch_size,
         )
 
     def forward(self, x):
 
-        # [B, 1, F, T]
-        x = self.proj(x)
+        x = self.proj(
+            x
+        )
 
-        # [B, embed_dim, H', W']
         b, c, h, w = x.shape
 
-        # [B, H' * W', embed_dim]
-        x = x.flatten(2).transpose(1, 2)
+        x = x.flatten(
+            2
+        ).transpose(
+            1,
+            2,
+        )
 
-        return x, (h, w)
+        return x, (
+            h,
+            w,
+        )
 
 
-class ViT(nn.Module):
+class AST(nn.Module):
 
     def __init__(
         self,
+
         n_classes: int = 2,
         in_channels: int = 1,
-
         embed_dim: int = 384,
         depth: int = 8,
         n_heads: int = 6,
-
         mlp_ratio: float = 4.0,
-
         patch_size=(16, 4),
-
         dropout: float = 0.1,
-
         max_patches: int = 512,
     ):
-
         super().__init__()
 
-        self.patch_embed = PatchEmbed(
+        self.patch_embed = ASTPatchEmbed(
+
             in_channels=in_channels,
+
             embed_dim=embed_dim,
+
             patch_size=patch_size,
         )
 
         self.cls_token = nn.Parameter(
+
             torch.zeros(
                 1,
                 1,
@@ -91,6 +121,7 @@ class ViT(nn.Module):
         )
 
         self.pos_embed = nn.Parameter(
+
             torch.zeros(
                 1,
                 max_patches + 1,
@@ -99,12 +130,12 @@ class ViT(nn.Module):
         )
 
         nn.init.trunc_normal_(
-            self.pos_embed,
+            self.cls_token,
             std=0.02,
         )
 
         nn.init.trunc_normal_(
-            self.cls_token,
+            self.pos_embed,
             std=0.02,
         )
 
@@ -128,7 +159,9 @@ class ViT(nn.Module):
         )
 
         self.encoder = nn.TransformerEncoder(
+
             encoder_layer,
+
             num_layers=depth,
         )
 
@@ -161,9 +194,17 @@ class ViT(nn.Module):
 
             return self.pos_embed
 
-        cls_pos = self.pos_embed[:, :1, :]
+        cls_pos = self.pos_embed[
+            :,
+            :1,
+            :
+        ]
 
-        patch_pos = self.pos_embed[:, 1:, :]
+        patch_pos = self.pos_embed[
+            :,
+            1:,
+            :
+        ]
 
         patch_pos = patch_pos.transpose(
             1,
@@ -187,10 +228,12 @@ class ViT(nn.Module):
         )
 
         return torch.cat(
+
             [
                 cls_pos,
                 patch_pos,
             ],
+
             dim=1,
         )
 
@@ -198,29 +241,37 @@ class ViT(nn.Module):
 
         b = x.shape[0]
 
-        patches, (
-            h,
-            w,
-        ) = self.patch_embed(x)
+        patches, _ = self.patch_embed(
+            x
+        )
+
+        # [B, N, D]
 
         n_patches = patches.shape[1]
 
         cls_tokens = self.cls_token.expand(
+
             b,
+
             -1,
+
             -1,
         )
 
         tokens = torch.cat(
+
             [
                 cls_tokens,
                 patches,
             ],
+
             dim=1,
         )
 
         tokens = tokens + self._get_pos_embed(
+
             n_patches,
+
             x.device,
         )
 
@@ -232,7 +283,10 @@ class ViT(nn.Module):
             encoded
         )
 
-        cls_out = encoded[:, 0]
+        cls_out = encoded[
+            :,
+            0
+        ]
 
         return self.head(
             cls_out
@@ -241,7 +295,7 @@ class ViT(nn.Module):
 
 if __name__ == "__main__":
 
-    model = ViT()
+    model = AST()
 
     dummy = torch.randn(
         4,

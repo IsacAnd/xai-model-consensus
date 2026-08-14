@@ -5,3 +5,6 @@ __pycache__
 toy_data
 scripts
 results
+scripts
+.vscode
+tools

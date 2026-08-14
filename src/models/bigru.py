@@ -1,3 +1,31 @@
+"""
+BiGRU para classificação binária a partir de log-mel spectrogram.
+
+Arquitetura:
+
+    Log-mel spectrogram
+            ↓
+    5 × ConvBlock
+            ↓
+    DilatedBlock
+            ↓
+    SE Attention
+            ↓
+    Frequency reduction
+            ↓
+    BiGRU
+            ↓
+    Average + Max temporal pooling
+            ↓
+    Classifier
+
+Entrada:
+    [B, 1, n_mels, T]
+
+Saída:
+    [B, n_classes]
+"""
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -171,10 +199,13 @@ class DilatedBlock(nn.Module):
         return self.block(x)
 
 
-class CNN(nn.Module):
+class BiGRU(nn.Module):
     """
-    CNN convolucional ampliada para classificação binária
-    a partir de log-mel spectrogram.
+    CRNN ampliada:
+
+        CNN-Large backbone
+            +
+        BiGRU
 
     Entrada:
         [B, 1, n_mels, T]
@@ -187,6 +218,8 @@ class CNN(nn.Module):
         self,
         n_classes: int = 2,
         in_channels: int = 1,
+        rnn_hidden: int = 256,
+        rnn_layers: int = 2,
     ):
         super().__init__()
 
@@ -232,9 +265,33 @@ class CNN(nn.Module):
             512
         )
 
-        self.avg_pool = nn.AdaptiveAvgPool2d(
-            (1, 1)
+        self.freq_reduce_avg = nn.AdaptiveAvgPool2d(
+            (1, None)
         )
+
+        self.freq_reduce_max = nn.AdaptiveMaxPool2d(
+            (1, None)
+        )
+
+        self.rnn_input_size = 512 * 2
+
+        self.rnn = nn.GRU(
+            input_size=self.rnn_input_size,
+            hidden_size=rnn_hidden,
+            num_layers=rnn_layers,
+            batch_first=True,
+            bidirectional=True,
+            dropout=(
+                0.2
+                if rnn_layers > 1
+                else 0.0
+            ),
+        )
+
+        rnn_output_dim = rnn_hidden * 2
+
+        # Average + Max pooling temporal
+        pooled_dim = rnn_output_dim * 2
 
         self.classifier = nn.Sequential(
 
@@ -245,7 +302,7 @@ class CNN(nn.Module):
             ),
 
             nn.Linear(
-                512,
+                pooled_dim,
                 256,
             ),
 
@@ -278,8 +335,6 @@ class CNN(nn.Module):
 
     def forward(self, x):
 
-        # [B, 1, n_mels, T]
-
         feats = self.features(x)
 
         feats = self.dilated(
@@ -290,8 +345,43 @@ class CNN(nn.Module):
             feats
         )
 
-        pooled = self.avg_pool(
+        avg = self.freq_reduce_avg(
             feats
+        )
+
+        max_ = self.freq_reduce_max(
+            feats
+        )
+
+        avg = avg.squeeze(2)
+
+        max_ = max_.squeeze(2)
+
+        feats = torch.cat(
+            [avg, max_],
+            dim=1,
+        )
+
+        feats = feats.transpose(
+            1,
+            2,
+        )
+
+        rnn_out, _ = self.rnn(
+            feats
+        )
+
+        avg = rnn_out.mean(
+            dim=1
+        )
+
+        max_ = rnn_out.max(
+            dim=1
+        ).values
+
+        pooled = torch.cat(
+            [avg, max_],
+            dim=1,
         )
 
         return self.classifier(
@@ -301,7 +391,7 @@ class CNN(nn.Module):
 
 if __name__ == "__main__":
 
-    model = CNN()
+    model = BiGRU()
 
     dummy = torch.randn(
         4,
@@ -316,4 +406,4 @@ if __name__ == "__main__":
 
     print(
         output.shape
-    )
+    )  # -> [4, 2]
