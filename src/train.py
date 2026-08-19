@@ -1,18 +1,3 @@
-"""
-Etapa 2 - Treinamento dos modelos.
-
-Hiperparâmetros padronizados entre todos os modelos (config.TRAIN):
-  - Optimizer: AdamW
-  - Batch size: 32
-  - Epochs: até 50 (com early stopping)
-  - LR: 3e-4, com ReduceLROnPlateau (mesmo scheduler para todos)
-  - Critério de seleção: menor EER de validação (early_stopping_metric)
-
-Uso:
-    python -m src.train --model cnn
-    python -m src.train --model all      # treina os 6 modelos em sequência
-"""
-
 import argparse
 import json
 import logging
@@ -26,7 +11,7 @@ from torch.utils.data import DataLoader
 
 from config import AUDIO, MODEL_NAMES, PATHS, TRAIN
 from src.dataset import ADDDataset, collate_fn, load_manifest
-from src.metrics import compute_all_metrics
+from src.metrics import compute_all_metrics, compute_optimal_threshold
 from src.models import build_model
 from src.utils import EarlyStopping, set_seed, setup_logging
 
@@ -39,10 +24,42 @@ def build_optimizer(model: nn.Module):
 
 
 def build_scheduler(optimizer):
+    # O scheduler passa a monitorar a MESMA métrica do critério de seleção (antes eles monitoravam 2 diferentes)
     return torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="min", factor=TRAIN.scheduler_factor,
+        optimizer, mode=TRAIN.early_stopping_mode, factor=TRAIN.scheduler_factor,
         patience=TRAIN.scheduler_patience,
     )
+
+
+def compute_class_weights(manifest, device) -> torch.Tensor:
+    """
+    FIX: novo helper. Calcula pesos de classe balanceados (inverso da
+    frequência) a partir do split de treino, para combater o desbalanceamento
+    do ASVspoof5 (spoof >> bonafide) que estava causando precision alta /
+    recall baixo e degradando ao longo do treino.
+    """
+    df = manifest[manifest["split"] == "train"].dropna(subset=["label"])
+    counts = df["label"].astype(int).value_counts()
+    n_bonafide = int(counts.get(0, 0))
+    n_spoof = int(counts.get(1, 0))
+    total = n_bonafide + n_spoof
+
+    if n_bonafide == 0 or n_spoof == 0:
+        logger.warning(
+            "Não foi possível calcular class weights (n_bonafide=%d, n_spoof=%d). "
+            "Usando pesos uniformes.", n_bonafide, n_spoof,
+        )
+        return torch.tensor([1.0, 1.0], device=device)
+
+    weights = torch.tensor([
+        total / (2.0 * n_bonafide),
+        total / (2.0 * n_spoof),
+    ], dtype=torch.float32, device=device)
+    logger.info(
+        "Class weights calculados: bonafide(0)=%.4f (n=%d), spoof(1)=%.4f (n=%d)",
+        weights[0].item(), n_bonafide, weights[1].item(), n_spoof,
+    )
+    return weights
 
 
 @torch.no_grad()
@@ -60,10 +77,17 @@ def evaluate(model, loader, device, criterion):
 
     y_score = np.concatenate(all_probs)
     y_true = np.concatenate(all_labels)
-    y_pred = (y_score >= 0.5).astype(int)
+
+    # FIX: threshold ótimo (ponto de EER) em vez de 0.5 fixo. Com classes
+    # desbalanceadas, 0.5 gerava precision alta / recall baixo mesmo com boa
+    # capacidade discriminativa (AUC/EER razoáveis). O threshold é recalculado
+    # a cada época no dev set e salvo no checkpoint para uso em evaluate.py.
+    threshold = compute_optimal_threshold(y_true, y_score)
+    y_pred = (y_score >= threshold).astype(int)
 
     metrics = compute_all_metrics(y_true, y_pred, y_score)
     metrics["loss"] = float(np.sum(losses) / len(y_true))
+    metrics["threshold"] = threshold
     return metrics
 
 
@@ -103,7 +127,16 @@ def train_one_model(model_name: str):
     model = build_model(model_name, n_classes=TRAIN.n_classes).to(device)
     optimizer = build_optimizer(model)
     scheduler = build_scheduler(optimizer)
-    criterion = nn.CrossEntropyLoss(label_smoothing=TRAIN.label_smoothing)
+
+    # FIX: class weights balanceados calculados a partir do manifest de
+    # treino, para combater o desbalanceamento do ASVspoof5. Controlado por
+    # TRAIN.use_class_weights (config.py).
+    class_weights = None
+    if TRAIN.use_class_weights:
+        class_weights = compute_class_weights(train_manifest, device)
+    criterion = nn.CrossEntropyLoss(
+        weight=class_weights, label_smoothing=TRAIN.label_smoothing,
+    )
     scaler = torch.amp.GradScaler("cuda", enabled=TRAIN.mixed_precision and device.type == "cuda")
 
     early_stopper = EarlyStopping(
@@ -139,16 +172,21 @@ def train_one_model(model_name: str):
 
         train_loss = running_loss / n_seen
         val_metrics = evaluate(model, dev_loader, device, criterion)
-        scheduler.step(val_metrics["loss"])
+
+        # FIX: scheduler agora reage à métrica de seleção (early_stopping_metric,
+        # por padrão "eer"), não a val_loss. val_loss é sensível a desbalanceamento
+        # e estava explodindo mesmo com AUC/EER estáveis, fazendo o scheduler
+        # reagir a ruído em vez de à qualidade discriminativa real do modelo.
+        scheduler.step(val_metrics[TRAIN.early_stopping_metric])
 
         elapsed = time.time() - t0
         current_lr = optimizer.param_groups[0]["lr"]
         logger.info(
             "Epoch %02d/%d | train_loss=%.4f | val_loss=%.4f | val_eer=%.4f | "
-            "val_acc=%.4f | val_f1=%.4f | val_auc=%.4f | lr=%.2e | %.1fs",
+            "val_acc=%.4f | val_f1=%.4f | val_auc=%.4f | val_thr=%.4f | lr=%.2e | %.1fs",
             epoch, TRAIN.epochs, train_loss, val_metrics["loss"], val_metrics["eer"],
             val_metrics["accuracy"], val_metrics["f1"], val_metrics["roc_auc"],
-            current_lr, elapsed,
+            val_metrics["threshold"], current_lr, elapsed,
         )
 
         history.append({"epoch": epoch, "train_loss": train_loss, "lr": current_lr,

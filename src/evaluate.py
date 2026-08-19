@@ -1,19 +1,3 @@
-"""
-Etapa 3 - Avaliação quantitativa.
-
-Roda o(s) melhor(es) checkpoint(s) (salvos pela Etapa 2) sobre o split de
-`eval` OFICIAL COMPLETO do ASVspoof5 (não o subset de 1000 usado depois na
-Etapa 4/XAI) e reporta accuracy, precision, recall, f1, roc-auc e eer.
-
-Uso:
-    python -m src.evaluate --model cnn
-    python -m src.evaluate --model all      # avalia os 6 modelos e gera tabela comparativa
-
-Saídas:
-    results/logs/eval_<modelo>.json   -> métricas detalhadas de cada modelo
-    results/logs/eval_summary.csv     -> tabela comparativa (uma linha por modelo)
-"""
-
 import argparse
 import json
 import logging
@@ -74,11 +58,20 @@ def evaluate_model(model_name: str, split: str = "eval") -> dict:
                          num_workers=TRAIN.num_workers, collate_fn=collate_fn)
 
     y_true, y_score, file_ids = run_inference(model, loader, device)
-    y_pred = (y_score >= 0.5).astype(int)
+
+    # FIX: usa o threshold ótimo (ponto de EER) calculado no dev set durante
+    # o treino e salvo no checkpoint, em vez de 0.5 fixo. Mantém consistência
+    # entre a seleção de checkpoint (train.py) e a avaliação final. Fallback
+    # para 0.5 se o checkpoint for de uma versão anterior sem essa chave.
+    threshold = ckpt["val_metrics"].get("threshold", 0.5)
+    logger.info("[%s] usando threshold=%.4f (calculado no dev durante o treino)",
+                model_name, threshold)
+    y_pred = (y_score >= threshold).astype(int)
     metrics = compute_all_metrics(y_true, y_pred, y_score)
     metrics["model"] = model_name
     metrics["split"] = split
     metrics["n_samples"] = int(len(y_true))
+    metrics["threshold_used"] = threshold
 
     logger.info(
         "[%s] acc=%.4f prec=%.4f rec=%.4f f1=%.4f auc=%.4f eer=%.4f (n=%d)",
@@ -116,7 +109,7 @@ def main():
     if all_metrics:
         summary = pd.DataFrame(all_metrics)[
             ["model", "split", "n_samples", "accuracy", "precision",
-             "recall", "f1", "roc_auc", "eer"]
+             "recall", "f1", "roc_auc", "eer", "threshold_used"]
         ].sort_values("eer")
         summary_path = PATHS.log_dir / "eval_summary.csv"
         summary.to_csv(summary_path, index=False)

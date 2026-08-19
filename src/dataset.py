@@ -1,9 +1,3 @@
-"""
-Dataset PyTorch para o pipeline ADD.
-Cada item: aplica random crop (2s) + extração log-mel (via audio_processing.py),
-usando cache em disco para acelerar epochs subsequentes.
-"""
-
 import logging
 from pathlib import Path
 
@@ -44,7 +38,13 @@ class ADDDataset(Dataset):
 
     def __getitem__(self, idx):
         row = self.df.iloc[idx]
-        generator = torch.Generator().manual_seed(idx)  # crop determinístico por item
+
+        if self.split == "train":
+            generator = torch.Generator()
+            generator.manual_seed(torch.seed() & 0xFFFFFFFF)  # semente nova a cada chamada
+        else:
+            generator = torch.Generator().manual_seed(idx)  # dev/eval: determinístico
+
         log_mel = compute_and_cache_logmel(
             audio_path=Path(row["path"]),
             file_id=row["file_id"],

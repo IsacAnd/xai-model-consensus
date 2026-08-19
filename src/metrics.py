@@ -1,5 +1,3 @@
-"""Métricas de avaliação (Etapa 3), padronizadas para todos os modelos."""
-
 import numpy as np
 from sklearn.metrics import (accuracy_score, precision_recall_fscore_support,
                               roc_auc_score, roc_curve)
@@ -23,11 +21,30 @@ def compute_eer(y_true: np.ndarray, y_score: np.ndarray) -> float:
     return float(eer)
 
 
+def compute_optimal_threshold(y_true: np.ndarray, y_score: np.ndarray) -> float:
+    """
+    FIX: threshold ótimo pelo ponto de EER (onde FPR ~= FNR), em vez do
+    0.5 fixo usado antes em train.py/evaluate.py. Com classes desbalanceadas
+    (ASVspoof5), 0.5 quase nunca é o corte ideal e é o que estava produzindo
+    precision alta / recall baixo mesmo com boa capacidade discriminativa
+    (AUC/EER estáveis). Retorna 0.5 como fallback se y_true tiver só 1 classe.
+    """
+    if len(np.unique(y_true)) < 2:
+        return 0.5
+    fpr, tpr, thresholds = roc_curve(y_true, y_score, pos_label=1)
+    fnr = 1 - tpr
+    diff = np.abs(fpr - fnr)
+    if np.all(np.isnan(diff)):
+        return 0.5
+    idx = np.nanargmin(diff)
+    return float(thresholds[idx])
+
+
 def compute_all_metrics(y_true: np.ndarray, y_pred: np.ndarray,
                          y_score: np.ndarray) -> dict:
     """
     y_true: rótulos binários (0=bonafide, 1=spoof)
-    y_pred: predições binárias (0/1) após threshold (ex.: argmax)
+    y_pred: predições binárias (0/1) após threshold (ex.: argmax ou threshold ótimo)
     y_score: probabilidade da classe 1 (spoof), usada para ROC-AUC e EER
     """
     acc = accuracy_score(y_true, y_pred)

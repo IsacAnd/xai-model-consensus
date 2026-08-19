@@ -175,7 +175,13 @@ class TrainConfig:
     num_workers: int = field(default_factory=lambda: _env_int("ADD_NUM_WORKERS", 0))
     seed: int = 42
     device: str = field(default_factory=lambda: _env_str("ADD_DEVICE", "cuda"))
-    label_smoothing: float = 0.0
+    # FIX: label_smoothing estava em 0.0. ASVspoof5 é fortemente desbalanceado
+    # (spoof >> bonafide), e sem suavização o modelo satura o sigmoid/softmax
+    # rápido demais.
+    label_smoothing: float = 0.1
+    # FIX: novo flag - ativa ponderação de classes na CrossEntropyLoss,
+    # calculada a partir da distribuição real do manifest de treino
+    use_class_weights: bool = True
     n_classes: int = 2                # 0 = bonafide, 1 = spoof
     mixed_precision: bool = True
 
